@@ -1,0 +1,60 @@
+#!/bin/bash
+
+set -e
+
+# create a lumberjack config
+
+CFG_LUMBERJACK=/etc/scs/logs-lumberjack.conf
+
+NET_SERVERS=`sed ':a;N;$!ba;s/\n/", "/g' /etc/scs-runtime/logs/servers | sed -r 's/", "$/"/;s/([^"])$/\1"/;s/^/"/'`
+LOG_FILES=`find /var/log/scs-logs -xtype l > /dev/null 2>&1 ; echo $?`
+
+echo '' > $CFG_LUMBERJACK
+echo '{' >> $CFG_LUMBERJACK
+echo '  "network" : {' >> $CFG_LUMBERJACK
+echo "    \"servers\" :  [ $NET_SERVERS ]," >> $CFG_LUMBERJACK
+echo '    "ssl certificate" : "/etc/scs-runtime/logs/ssl.key",' >> $CFG_LUMBERJACK
+echo '    "ssl ca" : "/etc/scs-runtime/logs/ca.crt",' >> $CFG_LUMBERJACK
+echo '    "timeout" : 30' >> $CFG_LUMBERJACK
+echo '  },' >> $CFG_LUMBERJACK
+echo '  "files" : [' >> $CFG_LUMBERJACK
+
+CFG_LUMBERJACK_FILE_COMMA=''
+
+find /var/log/scs-logs -xtype l | while read LOG_SYMLINK ; do
+    FIELD_SOURCE_PATH=`readlink "$LOG_SYMLINK"`
+    FIELD_SOURCE_TYPE=`basename "$LOG_SYMLINK" | sed -r 's/([^:]+):[^:]*$/\1/'`
+    FIELD_SOURCE_NAME=`basename "$LOG_SYMLINK" | sed -r 's/[^:]+:([^:]+)$/\1/'`
+    FIELD_SOURCE_HOST="$SCS_RUN_ID"
+
+    echo "    $CFG_LUMBERJACK_FILE_COMMA" >> $CFG_LUMBERJACK
+    echo '    {' >> $CFG_LUMBERJACK
+    echo "      \"paths\" : [ \"$FIELD_SOURCE_PATH\" ]," >> $CFG_LUMBERJACK
+    echo '      "fields" : {' >> $CFG_LUMBERJACK
+    echo "        \"@source_path\" : \"$FIELD_SOURCE_PATH\"," >> $CFG_LUMBERJACK
+    echo "        \"@source_type\" : \"$FIELD_SOURCE_TYPE\"," >> $CFG_LUMBERJACK
+    echo "        \"@source_name\" : \"$FIELD_SOURCE_NAME\"," >> $CFG_LUMBERJACK
+    echo "        \"@source_host\" : \"$FIELD_SOURCE_HOST\"" >> $CFG_LUMBERJACK
+    echo '      }' >> $CFG_LUMBERJACK
+    echo '    }' >> $CFG_LUMBERJACK
+
+    CFG_LUMBERJACK_FILE_COMMA=','
+done
+
+echo '  ]' >> $CFG_LUMBERJACK
+echo '}' >> $CFG_LUMBERJACK
+
+# unless there's nothing to do, add supervisor job
+
+if [[ "" == "$NET_SERVERS" ]] || [[ "0" != "$LOG_FILES" ]] ; then
+    exit
+fi
+
+CFG_SUPERVISOR=/etc/supervisor.d/scs-logs.conf
+
+echo '' > $CFG_SUPERVISOR
+echo '[program:scs-logs]' >> $CFG_SUPERVISOR
+echo "command = logstash-forwarder -config $CFG_LUMBERJACK" >> $CFG_SUPERVISOR
+echo 'priority = 64' >> $CFG_SUPERVISOR
+echo 'stdout_logfile = /var/log/supervisor/scs-logs-stdout.log' >> $CFG_SUPERVISOR
+echo 'stdout_logfile = /var/log/supervisor/scs-logs-stderr.log' >> $CFG_SUPERVISOR

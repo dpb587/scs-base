@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# args: runtime-network-interface runtime-logs-method
+
+set -e
+
+pipework --wait -i $1
+
+[[ -e /usr/bin/scs-runtime-hook-start ]] && /usr/bin/scs-runtime-hook-start
+
+[[ "" != "$2" ]] && /usr/bin/scs-runtime-logs-$2
+
+exec /usr/local/bin/supervisord -c /etc/supervisor.conf
